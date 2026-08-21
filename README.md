@@ -22,11 +22,14 @@ Next.js(App Router) + Supabase(Postgres/Auth) + YouTube Data API v3 로 구성�
 
 ### 1-1. API 키/URL 확인
 
-프로젝트가 생성되면 **Project Settings → API** 메뉴에서 아래 값을 확인해 `.env.local`에 사용합니다.
+프로젝트가 생성되면 왼쪽 사이드바 맨 아래 **⚙️ Settings → API Keys** 메뉴에서 아래 값을 확인해 `.env.local`에 사용합니다. (예전 "Project Settings → API" 경로는 개편되어 사라졌습니다.)
 
-- `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-- `anon public` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (⚠️ 절대 클라이언트/공개 저장소에 노출 금지, 서버 전용)
+- 같은 페이지 상단(또는 **Connect** 다이얼로그)에서 `Project URL` 확인 → `NEXT_PUBLIC_SUPABASE_URL`
+- **"Publishable and secret API keys"** 탭 선택 (2025년 이후 새 프로젝트는 이 탭만 존재):
+  - `Publishable key` (`sb_publishable_...`) → `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+  - `Secret keys`의 값 (`sb_secret_...`) → `SUPABASE_SECRET_KEY` (⚠️ 절대 클라이언트/공개 저장소에 노출 금지, 서버 전용)
+
+> 오래된 프로젝트라 **"Legacy API Keys"** 탭에 `anon public` / `service_role` 키가 남아있다면, 그 값을 각각 `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`로 대신 넣어도 코드가 자동으로 인식합니다 (`.env.local.example` 하단 참고). 두 체계는 동일한 권한 수준(같은 RLS 동작)이라 어느 쪽을 써도 무방합니다.
 
 ### 1-2. DB 스키마 적용
 
@@ -76,8 +79,8 @@ http://localhost:3000 접속 → Supabase에서 만든 팀원 계정으로 로�
 | 변수 | 설명 |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase 프로젝트 URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon(public) key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (서버 전용, cron 갱신에 사용) |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (레거시 프로젝트는 `NEXT_PUBLIC_SUPABASE_ANON_KEY`) |
+| `SUPABASE_SECRET_KEY` | Supabase secret key (서버 전용, cron 갱신에 사용. 레거시 프로젝트는 `SUPABASE_SERVICE_ROLE_KEY`) |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 키 (서버 전용) |
 | `CRON_SECRET` | `/api/channels/refresh` 보호용 임의 문자열 |
 
