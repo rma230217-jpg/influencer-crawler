@@ -29,7 +29,12 @@ export default function AddChannelPage() {
       const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(query.trim())}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "검색에 실패했습니다.");
-      setCandidates(data.candidates);
+      const fetchedCandidates: ChannelCandidate[] = data.candidates;
+      setCandidates(fetchedCandidates);
+      // 채널명/소개란/최근 업로드 제목 기반 자동 분류 결과를 기본값으로 채워둔다.
+      setCategoriesByChannel(
+        Object.fromEntries(fetchedCandidates.map((c) => [c.youtubeChannelId, c.suggestedCategories])),
+      );
     } catch (err) {
       setSearchError(err instanceof Error ? err.message : "검색에 실패했습니다.");
     } finally {
@@ -55,11 +60,6 @@ export default function AddChannelPage() {
     const selectedIds = Object.keys(selected).filter((id) => selected[id]);
     if (selectedIds.length === 0) {
       setSubmitError("등록할 채널을 하나 이상 선택하세요.");
-      return;
-    }
-    const missingCategory = selectedIds.find((id) => !(categoriesByChannel[id]?.length > 0));
-    if (missingCategory) {
-      setSubmitError("선택한 채널에는 카테고리를 하나 이상 지정해야 합니다.");
       return;
     }
 
@@ -169,27 +169,31 @@ export default function AddChannelPage() {
                     </p>
                     <p className="mt-1 line-clamp-2 text-xs text-neutral-400">{c.description}</p>
 
-                    {selected[c.youtubeChannelId] && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {CATEGORIES.map((cat) => {
-                          const active = categoriesByChannel[c.youtubeChannelId]?.includes(cat);
-                          return (
-                            <button
-                              key={cat}
-                              type="button"
-                              onClick={() => toggleCategory(c.youtubeChannelId, cat)}
-                              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                                active
-                                  ? "bg-neutral-900 text-white"
-                                  : "border border-neutral-300 text-neutral-600 hover:bg-neutral-100"
-                              }`}
-                            >
-                              {cat}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <p className="mt-2 text-xs text-neutral-400">
+                      자동 분류된 카테고리입니다. 틀렸다면 클릭해서 수정하세요.
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {CATEGORIES.map((cat) => {
+                        const active = categoriesByChannel[c.youtubeChannelId]?.includes(cat);
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => toggleCategory(c.youtubeChannelId, cat)}
+                            className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                              active
+                                ? "bg-neutral-900 text-white"
+                                : "border border-neutral-300 text-neutral-600 hover:bg-neutral-100"
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        );
+                      })}
+                      {!categoriesByChannel[c.youtubeChannelId]?.length && (
+                        <span className="px-1 py-1 text-xs text-neutral-400">(분류 안 됨 — 직접 선택 가능)</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

@@ -34,6 +34,7 @@ export type ChannelCandidate = {
   avgViewsLast6Shorts: number | null;
   contactEmail: string | null;
   alreadyRegistered: boolean;
+  suggestedCategories: Category[];
 };
 
 export type SortKey = "subscriber_count" | "avg_views_last_6_shorts";

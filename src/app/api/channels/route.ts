@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { computeAvgViewsOfRecentShorts, fetchChannelDetails } from "@/lib/youtube";
+import { classifyCategories } from "@/lib/categorize";
 import { CATEGORIES, type Category, type Channel } from "@/lib/types";
 
 type ChannelRow = {
@@ -56,7 +57,8 @@ export async function GET() {
 }
 
 type RegisterBody = {
-  candidates: { youtubeChannelId: string; categories: Category[] }[];
+  // categories를 생략하면 채널명/소개란/최근 업로드 제목 기반으로 자동 분류한다.
+  candidates: { youtubeChannelId: string; categories?: Category[] }[];
 };
 
 function isValidCategory(value: unknown): value is Category {
@@ -79,13 +81,10 @@ export async function POST(request: NextRequest) {
   }
 
   for (const candidate of body.candidates) {
-    if (!candidate.youtubeChannelId || !candidate.categories?.length) {
-      return NextResponse.json(
-        { error: "각 채널에는 카테고리를 하나 이상 선택해야 합니다." },
-        { status: 400 },
-      );
+    if (!candidate.youtubeChannelId) {
+      return NextResponse.json({ error: "채널 정보가 올바르지 않습니다." }, { status: 400 });
     }
-    if (!candidate.categories.every(isValidCategory)) {
+    if (candidate.categories && !candidate.categories.every(isValidCategory)) {
       return NextResponse.json({ error: "유효하지 않은 카테고리입니다." }, { status: 400 });
     }
   }
@@ -101,7 +100,10 @@ export async function POST(request: NextRequest) {
       const detail = detailsById.get(candidate.youtubeChannelId);
       if (!detail) continue;
 
-      const { avgViews } = await computeAvgViewsOfRecentShorts(detail.uploadsPlaylistId);
+      const { avgViews, recentTitles } = await computeAvgViewsOfRecentShorts(detail.uploadsPlaylistId);
+      const categories =
+        candidate.categories ??
+        classifyCategories([detail.channelName, detail.description, ...recentTitles].join(" "));
 
       const { data: row, error } = await supabase
         .from("channels")
@@ -127,11 +129,13 @@ export async function POST(request: NextRequest) {
       }
 
       await supabase.from("channel_categories").delete().eq("channel_id", row.id);
-      const { error: catError } = await supabase
-        .from("channel_categories")
-        .insert(candidate.categories.map((category) => ({ channel_id: row.id, category })));
-      if (catError) {
-        return NextResponse.json({ error: catError.message }, { status: 500 });
+      if (categories.length > 0) {
+        const { error: catError } = await supabase
+          .from("channel_categories")
+          .insert(categories.map((category) => ({ channel_id: row.id, category })));
+        if (catError) {
+          return NextResponse.json({ error: catError.message }, { status: 500 });
+        }
       }
 
       inserted.push(row);
