@@ -166,6 +166,8 @@ export default function AddChannelPage() {
                       구독자 {c.subscriberCount.toLocaleString("ko-KR")}명 · 최근 숏폼 평균 조회수{" "}
                       {c.avgViewsLast6Shorts?.toLocaleString("ko-KR") ?? "숏폼 없음"}
                       {c.contactEmail ? ` · ${c.contactEmail}` : ""}
+                      {c.contactPhone ? ` · ${c.contactPhone}` : ""}
+                      {c.contactInstagram ? ` · IG` : ""}
                     </p>
                     <p className="mt-1 line-clamp-2 text-xs text-neutral-400">{c.description}</p>
 

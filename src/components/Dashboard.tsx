@@ -20,17 +20,56 @@ function formatDate(iso: string) {
   });
 }
 
-export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
+function escapeCsvField(value: string): string {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function downloadChannelsCsv(channels: Channel[]) {
+  const header = ["계정명", "채널 URL", "구독자수", "평균조회수", "카테고리", "이메일", "전화번호", "인스타그램 링크"];
+  const rows = channels.map((c) => [
+    c.channel_name,
+    c.channel_url,
+    String(c.subscriber_count),
+    c.avg_views_last_6_shorts !== null ? String(c.avg_views_last_6_shorts) : "",
+    c.categories.join(" "),
+    c.contact_email ?? "",
+    c.contact_phone ?? "",
+    c.contact_instagram ?? "",
+  ]);
+
+  // 엑셀에서 한글이 깨지지 않도록 UTF-8 BOM을 붙인다.
+  const csv = "﻿" + [header, ...rows].map((row) => row.map(escapeCsvField).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `influencer-channels-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+export function Dashboard({
+  initialChannels,
+  variant = "all",
+}: {
+  initialChannels: Channel[];
+  variant?: "all" | "saved";
+}) {
   const [channels, setChannels] = useState(initialChannels);
   const [activeCategory, setActiveCategory] = useState<Category | "전체">("전체");
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("subscriber_count");
+  const [sortKey, setSortKey] = useState<SortKey>("avg_views_last_6_shorts");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [view, setView] = useState<"card" | "table">("table");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCategories, setEditCategories] = useState<Category[]>([]);
   const [savingCategories, setSavingCategories] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [contactChannelId, setContactChannelId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     let list = channels;
@@ -39,9 +78,15 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
       list = list.filter((c) => c.categories.includes(activeCategory));
     }
 
+    // 9.1 통합 검색: 채널명 / 소개란 / 카테고리 / 이메일 중 어디에 매칭돼도 결과에 포함한다.
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter((c) => c.channel_name.toLowerCase().includes(q));
+      list = list.filter((c) => {
+        const haystack = [c.channel_name, c.description ?? "", c.contact_email ?? "", ...c.categories]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(q);
+      });
     }
 
     return [...list].sort((a, b) => {
@@ -50,6 +95,8 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
       return sortDirection === "desc" ? bv - av : av - bv;
     });
   }, [channels, activeCategory, search, sortKey, sortDirection]);
+
+  const contactChannel = channels.find((c) => c.id === contactChannelId) ?? null;
 
   function startEditingCategories(channel: Channel) {
     setEditingId(channel.id);
@@ -90,6 +137,39 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
     }
   }
 
+  // 9.5 저장 목록(즐겨찾기, 팀 전체 공유) 토글
+  async function toggleSaved(channel: Channel) {
+    setSavingId(channel.id);
+    const res = await fetch(`/api/channels/${channel.id}/saved`, {
+      method: channel.is_saved ? "DELETE" : "POST",
+    });
+    setSavingId(null);
+    if (!res.ok) {
+      alert("저장 목록 변경에 실패했습니다.");
+      return;
+    }
+    if (variant === "saved" && channel.is_saved) {
+      // 저장 목록 페이지에서 해제하면 목록에서 바로 사라진다.
+      setChannels((prev) => prev.filter((c) => c.id !== channel.id));
+    } else {
+      setChannels((prev) => prev.map((c) => (c.id === channel.id ? { ...c, is_saved: !c.is_saved } : c)));
+    }
+  }
+
+  async function saveContactField(id: string, field: "contact_email" | "contact_phone" | "contact_instagram", value: string) {
+    const trimmed = value.trim();
+    const res = await fetch(`/api/channels/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: trimmed || null }),
+    });
+    if (res.ok) {
+      setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: trimmed || null } : c)));
+    } else {
+      alert("연락처 저장에 실패했습니다.");
+    }
+  }
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -109,18 +189,27 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
           ))}
         </div>
 
-        <Link
-          href="/channels/add"
-          className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800"
-        >
-          + 신규 채널 추가
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => downloadChannelsCsv(filtered)}
+            disabled={filtered.length === 0}
+            className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+          >
+            엑셀 다운로드
+          </button>
+          <Link
+            href="/channels/add"
+            className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+          >
+            + 신규 채널 추가
+          </Link>
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <input
           type="text"
-          placeholder="채널명 검색"
+          placeholder="채널명 / 키워드 / 카테고리 통합 검색"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full max-w-xs rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
@@ -131,8 +220,8 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
           onChange={(e) => setSortKey(e.target.value as SortKey)}
           className="rounded-md border border-neutral-300 px-2 py-2 text-sm"
         >
-          <option value="subscriber_count">구독자 수</option>
           <option value="avg_views_last_6_shorts">평균 조회수</option>
+          <option value="subscriber_count">구독자 수</option>
         </select>
 
         <select
@@ -140,8 +229,8 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
           onChange={(e) => setSortDirection(e.target.value as SortDirection)}
           className="rounded-md border border-neutral-300 px-2 py-2 text-sm"
         >
-          <option value="desc">내림차순</option>
-          <option value="asc">오름차순</option>
+          <option value="desc">높은순</option>
+          <option value="asc">낮은순</option>
         </select>
 
         <div className="ml-auto flex overflow-hidden rounded-md border border-neutral-300 text-sm">
@@ -164,18 +253,18 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
 
       {filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed border-neutral-300 bg-white py-16 text-center text-sm text-neutral-500">
-          조건에 맞는 채널이 없습니다.
+          {variant === "saved" ? "저장된 채널이 없습니다." : "조건에 맞는 채널이 없습니다."}
         </div>
       ) : view === "table" ? (
         <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
               <tr>
+                <th className="px-4 py-2 font-medium" />
                 <th className="px-4 py-2 font-medium">채널명</th>
                 <th className="px-4 py-2 font-medium">구독자 수</th>
                 <th className="px-4 py-2 font-medium">평균 조회수</th>
                 <th className="px-4 py-2 font-medium">카테고리</th>
-                <th className="px-4 py-2 font-medium">연락처</th>
                 <th className="px-4 py-2 font-medium">최종 업데이트</th>
                 <th className="px-4 py-2 font-medium" />
               </tr>
@@ -183,6 +272,16 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
             <tbody>
               {filtered.map((c) => (
                 <tr key={c.id} className="border-b border-neutral-100 last:border-0">
+                  <td className="px-4 py-2">
+                    <button
+                      onClick={() => toggleSaved(c)}
+                      disabled={savingId === c.id}
+                      title={c.is_saved ? "저장 목록에서 제거" : "저장 목록에 추가"}
+                      className={`text-lg leading-none ${c.is_saved ? "text-amber-500" : "text-neutral-300 hover:text-neutral-500"}`}
+                    >
+                      {c.is_saved ? "★" : "☆"}
+                    </button>
+                  </td>
                   <td className="px-4 py-2">
                     <a
                       href={c.channel_url}
@@ -221,16 +320,23 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-neutral-700">{c.contact_email ?? "-"}</td>
                   <td className="px-4 py-2 text-neutral-500">{formatDate(c.last_updated_at)}</td>
                   <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => handleDelete(c.id)}
-                      disabled={deletingId === c.id}
-                      className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
-                    >
-                      삭제
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => setContactChannelId(c.id)}
+                        className="text-xs font-medium text-neutral-700 hover:underline"
+                      >
+                        컨택하기
+                      </button>
+                      <button
+                        onClick={() => handleDelete(c.id)}
+                        disabled={deletingId === c.id}
+                        className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
+                      >
+                        삭제
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -250,13 +356,23 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
                 >
                   {c.channel_name}
                 </a>
-                <button
-                  onClick={() => handleDelete(c.id)}
-                  disabled={deletingId === c.id}
-                  className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
-                >
-                  삭제
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => toggleSaved(c)}
+                    disabled={savingId === c.id}
+                    title={c.is_saved ? "저장 목록에서 제거" : "저장 목록에 추가"}
+                    className={`text-lg leading-none ${c.is_saved ? "text-amber-500" : "text-neutral-300 hover:text-neutral-500"}`}
+                  >
+                    {c.is_saved ? "★" : "☆"}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(c.id)}
+                    disabled={deletingId === c.id}
+                    className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
+                  >
+                    삭제
+                  </button>
+                </div>
               </div>
               <div className="mb-2">
                 {editingId === c.id ? (
@@ -291,15 +407,27 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
                   <dt>평균 조회수</dt>
                   <dd className="font-medium text-neutral-900">{formatNumber(c.avg_views_last_6_shorts)}</dd>
                 </div>
-                <div className="flex justify-between">
-                  <dt>연락처</dt>
-                  <dd>{c.contact_email ?? "-"}</dd>
-                </div>
               </dl>
-              <p className="mt-2 text-xs text-neutral-400">최종 업데이트 {formatDate(c.last_updated_at)}</p>
+              <div className="mt-2 flex items-center justify-between">
+                <p className="text-xs text-neutral-400">최종 업데이트 {formatDate(c.last_updated_at)}</p>
+                <button
+                  onClick={() => setContactChannelId(c.id)}
+                  className="text-xs font-medium text-neutral-700 hover:underline"
+                >
+                  컨택하기
+                </button>
+              </div>
             </div>
           ))}
         </div>
+      )}
+
+      {contactChannel && (
+        <ContactModal
+          channel={contactChannel}
+          onClose={() => setContactChannelId(null)}
+          onSaveField={saveContactField}
+        />
       )}
     </div>
   );
@@ -350,6 +478,90 @@ function CategoryEditor({
         <button onClick={onCancel} className="text-xs text-neutral-400 hover:text-neutral-700">
           취소
         </button>
+      </div>
+    </div>
+  );
+}
+
+// 9.3 컨택하기: 이메일/전화번호/인스타그램을 모아서 보여주고, 자동 추출이 비어있으면 수동으로 채울 수 있다.
+function ContactModal({
+  channel,
+  onClose,
+  onSaveField,
+}: {
+  channel: Channel;
+  onClose: () => void;
+  onSaveField: (id: string, field: "contact_email" | "contact_phone" | "contact_instagram", value: string) => void;
+}) {
+  const [email, setEmail] = useState(channel.contact_email ?? "");
+  const [phone, setPhone] = useState(channel.contact_phone ?? "");
+  const [instagram, setInstagram] = useState(channel.contact_instagram ?? "");
+
+  const fields: {
+    label: string;
+    value: string;
+    setValue: (v: string) => void;
+    field: "contact_email" | "contact_phone" | "contact_instagram";
+    placeholder: string;
+  }[] = [
+    { label: "이메일", value: email, setValue: setEmail, field: "contact_email", placeholder: "example@email.com" },
+    { label: "전화번호", value: phone, setValue: setPhone, field: "contact_phone", placeholder: "010-0000-0000" },
+    {
+      label: "인스타그램",
+      value: instagram,
+      setValue: setInstagram,
+      field: "contact_instagram",
+      placeholder: "https://www.instagram.com/handle",
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-lg bg-white p-5 shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-1 flex items-start justify-between">
+          <h2 className="text-base font-semibold text-neutral-900">{channel.channel_name} 컨택하기</h2>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700">
+            ✕
+          </button>
+        </div>
+        <p className="mb-4 text-xs text-neutral-400">
+          공개된 정보를 자동으로 모았습니다. 비어있거나 틀린 정보는 직접 수정해서 저장할 수 있어요.
+        </p>
+
+        <div className="space-y-3">
+          {fields.map(({ label, value, setValue, field, placeholder }) => (
+            <div key={field}>
+              <label className="mb-1 block text-xs font-medium text-neutral-500">{label}</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  placeholder={placeholder}
+                  className="flex-1 rounded-md border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:border-neutral-500"
+                />
+                <button
+                  onClick={() => onSaveField(channel.id, field, value)}
+                  className="rounded-md border border-neutral-300 px-2.5 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100"
+                >
+                  저장
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <a
+          href={channel.channel_url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 block text-center text-xs text-neutral-400 hover:text-neutral-700"
+        >
+          유튜브 채널 바로가기
+        </a>
       </div>
     </div>
   );

@@ -16,12 +16,16 @@ export type Channel = {
   youtube_channel_id: string | null;
   channel_name: string;
   channel_url: string;
+  description: string | null;
   subscriber_count: number;
   avg_views_last_6_shorts: number | null;
   contact_email: string | null;
+  contact_phone: string | null;
+  contact_instagram: string | null;
   last_updated_at: string;
   created_at: string;
   categories: Category[];
+  is_saved: boolean;
 };
 
 export type ChannelCandidate = {
@@ -33,6 +37,8 @@ export type ChannelCandidate = {
   subscriberCount: number;
   avgViewsLast6Shorts: number | null;
   contactEmail: string | null;
+  contactPhone: string | null;
+  contactInstagram: string | null;
   alreadyRegistered: boolean;
   suggestedCategories: Category[];
 };
