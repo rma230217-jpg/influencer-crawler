@@ -28,6 +28,9 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [view, setView] = useState<"card" | "table">("table");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editCategories, setEditCategories] = useState<Category[]>([]);
+  const [savingCategories, setSavingCategories] = useState(false);
 
   const filtered = useMemo(() => {
     let list = channels;
@@ -47,6 +50,33 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
       return sortDirection === "desc" ? bv - av : av - bv;
     });
   }, [channels, activeCategory, search, sortKey, sortDirection]);
+
+  function startEditingCategories(channel: Channel) {
+    setEditingId(channel.id);
+    setEditCategories(channel.categories);
+  }
+
+  function toggleEditCategory(category: Category) {
+    setEditCategories((prev) =>
+      prev.includes(category) ? prev.filter((c) => c !== category) : [...prev, category],
+    );
+  }
+
+  async function saveCategories(id: string) {
+    setSavingCategories(true);
+    const res = await fetch(`/api/channels/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ categories: editCategories }),
+    });
+    setSavingCategories(false);
+    if (res.ok) {
+      setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, categories: editCategories } : c)));
+      setEditingId(null);
+    } else {
+      alert("카테고리 저장에 실패했습니다.");
+    }
+  }
 
   async function handleDelete(id: string) {
     if (!confirm("이 채널을 목록에서 삭제할까요?")) return;
@@ -166,11 +196,30 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
                   <td className="px-4 py-2 text-neutral-700">{formatNumber(c.subscriber_count)}</td>
                   <td className="px-4 py-2 text-neutral-700">{formatNumber(c.avg_views_last_6_shorts)}</td>
                   <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {c.categories.map((cat) => (
-                        <CategoryBadge key={cat} category={cat} />
-                      ))}
-                    </div>
+                    {editingId === c.id ? (
+                      <CategoryEditor
+                        selected={editCategories}
+                        onToggle={toggleEditCategory}
+                        onSave={() => saveCategories(c.id)}
+                        onCancel={() => setEditingId(null)}
+                        saving={savingCategories}
+                      />
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-1">
+                        {c.categories.map((cat) => (
+                          <CategoryBadge key={cat} category={cat} />
+                        ))}
+                        {c.categories.length === 0 && (
+                          <span className="text-xs text-neutral-400">미분류</span>
+                        )}
+                        <button
+                          onClick={() => startEditingCategories(c)}
+                          className="ml-1 text-xs text-neutral-400 hover:text-neutral-700"
+                        >
+                          수정
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-neutral-700">{c.contact_email ?? "-"}</td>
                   <td className="px-4 py-2 text-neutral-500">{formatDate(c.last_updated_at)}</td>
@@ -209,10 +258,29 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
                   삭제
                 </button>
               </div>
-              <div className="mb-2 flex flex-wrap gap-1">
-                {c.categories.map((cat) => (
-                  <CategoryBadge key={cat} category={cat} />
-                ))}
+              <div className="mb-2">
+                {editingId === c.id ? (
+                  <CategoryEditor
+                    selected={editCategories}
+                    onToggle={toggleEditCategory}
+                    onSave={() => saveCategories(c.id)}
+                    onCancel={() => setEditingId(null)}
+                    saving={savingCategories}
+                  />
+                ) : (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {c.categories.map((cat) => (
+                      <CategoryBadge key={cat} category={cat} />
+                    ))}
+                    {c.categories.length === 0 && <span className="text-xs text-neutral-400">미분류</span>}
+                    <button
+                      onClick={() => startEditingCategories(c)}
+                      className="ml-1 text-xs text-neutral-400 hover:text-neutral-700"
+                    >
+                      수정
+                    </button>
+                  </div>
+                )}
               </div>
               <dl className="space-y-1 text-sm text-neutral-600">
                 <div className="flex justify-between">
@@ -233,6 +301,56 @@ export function Dashboard({ initialChannels }: { initialChannels: Channel[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function CategoryEditor({
+  selected,
+  onToggle,
+  onSave,
+  onCancel,
+  saving,
+}: {
+  selected: Category[];
+  onToggle: (category: Category) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  return (
+    <div className="min-w-48">
+      <div className="flex flex-wrap gap-1">
+        {CATEGORIES.map((cat) => {
+          const active = selected.includes(cat);
+          return (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => onToggle(cat)}
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                active
+                  ? "bg-neutral-900 text-white"
+                  : "border border-neutral-300 text-neutral-600 hover:bg-neutral-100"
+              }`}
+            >
+              {cat}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1 flex gap-2">
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="text-xs font-medium text-neutral-900 hover:underline disabled:opacity-50"
+        >
+          저장
+        </button>
+        <button onClick={onCancel} className="text-xs text-neutral-400 hover:text-neutral-700">
+          취소
+        </button>
+      </div>
     </div>
   );
 }

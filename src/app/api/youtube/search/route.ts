@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { computeAvgViewsOfRecentShorts, fetchChannelDetails, searchChannelIds } from "@/lib/youtube";
+import { classifyCategories } from "@/lib/categorize";
 import type { ChannelCandidate } from "@/lib/types";
 
 // 키워드 검색 -> 채널 후보 목록 반환 (3.1 "키워드 검색 → 후보 등록 → 상세 정보 수집")
@@ -30,7 +31,10 @@ export async function GET(request: NextRequest) {
 
     const candidates: ChannelCandidate[] = await Promise.all(
       details.map(async (d) => {
-        const { avgViews } = await computeAvgViewsOfRecentShorts(d.uploadsPlaylistId);
+        const { avgViews, recentTitles } = await computeAvgViewsOfRecentShorts(d.uploadsPlaylistId);
+        const suggestedCategories = classifyCategories(
+          [d.channelName, d.description, ...recentTitles].join(" "),
+        );
         return {
           youtubeChannelId: d.youtubeChannelId,
           channelName: d.channelName,
@@ -41,6 +45,7 @@ export async function GET(request: NextRequest) {
           avgViewsLast6Shorts: avgViews,
           contactEmail: d.contactEmail,
           alreadyRegistered: existingIds.has(d.youtubeChannelId),
+          suggestedCategories,
         };
       }),
     );

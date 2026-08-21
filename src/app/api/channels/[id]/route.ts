@@ -18,11 +18,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const body = (await request.json().catch(() => null)) as { categories?: Category[] } | null;
-  if (!body?.categories?.length || !body.categories.every(isValidCategory)) {
-    return NextResponse.json(
-      { error: "카테고리를 하나 이상 올바르게 선택해야 합니다." },
-      { status: 400 },
-    );
+  if (!body?.categories || !body.categories.every(isValidCategory)) {
+    return NextResponse.json({ error: "유효하지 않은 카테고리입니다." }, { status: 400 });
   }
 
   const { error: deleteError } = await supabase.from("channel_categories").delete().eq("channel_id", id);
@@ -30,11 +27,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: deleteError.message }, { status: 500 });
   }
 
-  const { error: insertError } = await supabase
-    .from("channel_categories")
-    .insert(body.categories.map((category) => ({ channel_id: id, category })));
-  if (insertError) {
-    return NextResponse.json({ error: insertError.message }, { status: 500 });
+  if (body.categories.length > 0) {
+    const { error: insertError } = await supabase
+      .from("channel_categories")
+      .insert(body.categories.map((category) => ({ channel_id: id, category })));
+    if (insertError) {
+      return NextResponse.json({ error: insertError.message }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ ok: true });
