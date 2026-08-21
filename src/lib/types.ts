@@ -1,0 +1,40 @@
+export const CATEGORIES = [
+  "뷰티",
+  "패션",
+  "푸드",
+  "리빙/홈",
+  "육아",
+  "반려동물",
+  "살림",
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
+
+export type Channel = {
+  id: string;
+  platform: string;
+  youtube_channel_id: string | null;
+  channel_name: string;
+  channel_url: string;
+  subscriber_count: number;
+  avg_views_last_6_shorts: number | null;
+  contact_email: string | null;
+  last_updated_at: string;
+  created_at: string;
+  categories: Category[];
+};
+
+export type ChannelCandidate = {
+  youtubeChannelId: string;
+  channelName: string;
+  channelUrl: string;
+  thumbnailUrl: string | null;
+  description: string;
+  subscriberCount: number;
+  avgViewsLast6Shorts: number | null;
+  contactEmail: string | null;
+  alreadyRegistered: boolean;
+};
+
+export type SortKey = "subscriber_count" | "avg_views_last_6_shorts";
+export type SortDirection = "asc" | "desc";

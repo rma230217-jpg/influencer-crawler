@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/channels/refresh",
+      "schedule": "0 18 * * *"
+    }
+  ]
+}
