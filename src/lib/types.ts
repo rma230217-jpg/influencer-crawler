@@ -6,6 +6,9 @@ export const CATEGORIES = [
   "육아",
   "반려동물",
   "살림",
+  "건강",
+  "헬스",
+  "사주",
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
