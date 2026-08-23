@@ -1,8 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
-import { CATEGORIES, type Category, type Channel, type SortDirection, type SortKey } from "@/lib/types";
+import {
+  CATEGORIES,
+  type Category,
+  type Channel,
+  type ChannelCandidate,
+  type SortDirection,
+  type SortKey,
+} from "@/lib/types";
 import { CategoryBadge } from "@/components/CategoryBadge";
 
 function formatNumber(n: number | null) {
@@ -60,7 +66,6 @@ export function Dashboard({
 }) {
   const [channels, setChannels] = useState(initialChannels);
   const [activeCategory, setActiveCategory] = useState<Category | "전체">("전체");
-  const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("avg_views_last_6_shorts");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [view, setView] = useState<"card" | "table">("table");
@@ -71,6 +76,14 @@ export function Dashboard({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [contactChannelId, setContactChannelId] = useState<string | null>(null);
 
+  // 9.1 메인 검색: 키워드/채널/주제로 유튜브에서 실시간으로 활동 중인 계정을 찾는다.
+  const [ytQuery, setYtQuery] = useState("");
+  const [ytLoading, setYtLoading] = useState(false);
+  const [ytError, setYtError] = useState<string | null>(null);
+  const [ytResults, setYtResults] = useState<ChannelCandidate[] | null>(null);
+  const [ytCategoriesByChannel, setYtCategoriesByChannel] = useState<Record<string, Category[]>>({});
+  const [registeringId, setRegisteringId] = useState<string | null>(null);
+
   const filtered = useMemo(() => {
     let list = channels;
 
@@ -78,25 +91,85 @@ export function Dashboard({
       list = list.filter((c) => c.categories.includes(activeCategory));
     }
 
-    // 9.1 통합 검색: 채널명 / 소개란 / 카테고리 / 이메일 중 어디에 매칭돼도 결과에 포함한다.
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((c) => {
-        const haystack = [c.channel_name, c.description ?? "", c.contact_email ?? "", ...c.categories]
-          .join(" ")
-          .toLowerCase();
-        return haystack.includes(q);
-      });
-    }
-
     return [...list].sort((a, b) => {
       const av = a[sortKey] ?? -1;
       const bv = b[sortKey] ?? -1;
       return sortDirection === "desc" ? bv - av : av - bv;
     });
-  }, [channels, activeCategory, search, sortKey, sortDirection]);
+  }, [channels, activeCategory, sortKey, sortDirection]);
 
   const contactChannel = channels.find((c) => c.id === contactChannelId) ?? null;
+
+  async function refreshChannels() {
+    const res = await fetch("/api/channels");
+    if (res.ok) {
+      const data = await res.json();
+      setChannels(data.channels);
+    }
+  }
+
+  async function handleYoutubeSearch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!ytQuery.trim()) return;
+
+    setYtLoading(true);
+    setYtError(null);
+    setYtResults(null);
+
+    try {
+      const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(ytQuery.trim())}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "검색에 실패했습니다.");
+      const results: ChannelCandidate[] = data.candidates;
+      setYtResults(results);
+      setYtCategoriesByChannel(
+        Object.fromEntries(results.map((c) => [c.youtubeChannelId, c.suggestedCategories])),
+      );
+    } catch (err) {
+      setYtError(err instanceof Error ? err.message : "검색에 실패했습니다.");
+    } finally {
+      setYtLoading(false);
+    }
+  }
+
+  function toggleYtCategory(id: string, category: Category) {
+    setYtCategoriesByChannel((prev) => {
+      const current = prev[id] ?? [];
+      const next = current.includes(category)
+        ? current.filter((c) => c !== category)
+        : [...current, category];
+      return { ...prev, [id]: next };
+    });
+  }
+
+  async function registerCandidate(candidate: ChannelCandidate) {
+    setRegisteringId(candidate.youtubeChannelId);
+    const res = await fetch("/api/channels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidates: [
+          {
+            youtubeChannelId: candidate.youtubeChannelId,
+            categories: ytCategoriesByChannel[candidate.youtubeChannelId] ?? [],
+          },
+        ],
+      }),
+    });
+    setRegisteringId(null);
+
+    if (res.ok) {
+      setYtResults(
+        (prev) =>
+          prev?.map((c) =>
+            c.youtubeChannelId === candidate.youtubeChannelId ? { ...c, alreadyRegistered: true } : c,
+          ) ?? null,
+      );
+      await refreshChannels();
+    } else {
+      alert("등록에 실패했습니다.");
+    }
+  }
 
   function startEditingCategories(channel: Channel) {
     setEditingId(channel.id);
@@ -172,6 +245,68 @@ export function Dashboard({
 
   return (
     <div>
+      {/* 9.1 메인 검색: 키워드/채널/주제를 입력하면 유튜브에서 실시간으로 활동 중인 계정을 찾아온다. */}
+      <form onSubmit={handleYoutubeSearch} className="mb-4 flex gap-2">
+        <input
+          type="text"
+          value={ytQuery}
+          onChange={(e) => setYtQuery(e.target.value)}
+          placeholder="키워드 / 채널명 / 주제로 유튜브에서 활동 중인 계정 검색 (예: 육아 브이로그)"
+          className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
+        />
+        <button
+          type="submit"
+          disabled={ytLoading}
+          className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {ytLoading ? "검색 중..." : "검색"}
+        </button>
+        {ytResults && (
+          <button
+            type="button"
+            onClick={() => {
+              setYtResults(null);
+              setYtQuery("");
+            }}
+            className="rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
+          >
+            검색결과 지우기
+          </button>
+        )}
+      </form>
+
+      {ytError && (
+        <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{ytError}</p>
+      )}
+      {ytLoading && (
+        <p className="mb-4 text-sm text-neutral-500">
+          유튜브에서 활동 중인 계정을 찾는 중입니다 (조회수 계산 포함, 시간이 걸릴 수 있어요)...
+        </p>
+      )}
+      {ytResults && !ytLoading && (
+        <div className="mb-6 space-y-3">
+          <p className="text-sm text-neutral-500">
+            &quot;{ytQuery}&quot; 검색 결과 {ytResults.length}개 계정
+          </p>
+          {ytResults.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-neutral-300 bg-white py-10 text-center text-sm text-neutral-500">
+              활동 중인 계정을 찾지 못했습니다.
+            </div>
+          ) : (
+            ytResults.map((c) => (
+              <YoutubeCandidateRow
+                key={c.youtubeChannelId}
+                candidate={c}
+                selectedCategories={ytCategoriesByChannel[c.youtubeChannelId] ?? []}
+                onToggleCategory={(cat) => toggleYtCategory(c.youtubeChannelId, cat)}
+                onRegister={() => registerCandidate(c)}
+                registering={registeringId === c.youtubeChannelId}
+              />
+            ))
+          )}
+        </div>
+      )}
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1">
           {(["전체", ...CATEGORIES] as const).map((cat) => (
@@ -189,32 +324,16 @@ export function Dashboard({
           ))}
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => downloadChannelsCsv(filtered)}
-            disabled={filtered.length === 0}
-            className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
-          >
-            엑셀 다운로드
-          </button>
-          <Link
-            href="/channels/add"
-            className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800"
-          >
-            + 신규 채널 추가
-          </Link>
-        </div>
+        <button
+          onClick={() => downloadChannelsCsv(filtered)}
+          disabled={filtered.length === 0}
+          className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+        >
+          엑셀 다운로드
+        </button>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <input
-          type="text"
-          placeholder="채널명 / 키워드 / 카테고리 통합 검색"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full max-w-xs rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
-        />
-
         <select
           value={sortKey}
           onChange={(e) => setSortKey(e.target.value as SortKey)}
@@ -562,6 +681,88 @@ function ContactModal({
         >
           유튜브 채널 바로가기
         </a>
+      </div>
+    </div>
+  );
+}
+
+// 9.1 메인 검색 결과 한 줄: 유튜브에서 실시간으로 찾은 계정 + 바로 등록 가능한 버튼.
+function YoutubeCandidateRow({
+  candidate,
+  selectedCategories,
+  onToggleCategory,
+  onRegister,
+  registering,
+}: {
+  candidate: ChannelCandidate;
+  selectedCategories: Category[];
+  onToggleCategory: (category: Category) => void;
+  onRegister: () => void;
+  registering: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-white p-4">
+      <div className="flex items-start gap-3">
+        {candidate.thumbnailUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={candidate.thumbnailUrl} alt="" className="h-12 w-12 rounded-full" />
+        )}
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <a
+              href={candidate.channelUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-neutral-900 hover:underline"
+            >
+              {candidate.channelName}
+            </a>
+            {candidate.alreadyRegistered && (
+              <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-500">
+                이미 등록됨
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            구독자 {candidate.subscriberCount.toLocaleString("ko-KR")}명 · 최근 숏폼 평균 조회수{" "}
+            {candidate.avgViewsLast6Shorts?.toLocaleString("ko-KR") ?? "숏폼 없음"}
+            {candidate.contactEmail ? ` · ${candidate.contactEmail}` : ""}
+            {candidate.contactPhone ? ` · ${candidate.contactPhone}` : ""}
+            {candidate.contactInstagram ? " · IG" : ""}
+          </p>
+          <p className="mt-1 line-clamp-2 text-xs text-neutral-400">{candidate.description}</p>
+
+          {!candidate.alreadyRegistered && (
+            <>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {CATEGORIES.map((cat) => {
+                  const active = selectedCategories.includes(cat);
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => onToggleCategory(cat)}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                        active
+                          ? "bg-neutral-900 text-white"
+                          : "border border-neutral-300 text-neutral-600 hover:bg-neutral-100"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={onRegister}
+                disabled={registering}
+                className="mt-2 rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+              >
+                {registering ? "등록 중..." : "채널 등록"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
