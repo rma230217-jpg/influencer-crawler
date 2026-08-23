@@ -86,6 +86,7 @@ export function Dashboard({
   const [ytLoadingMore, setYtLoadingMore] = useState(false);
   const [ytError, setYtError] = useState<string | null>(null);
   const [ytResults, setYtResults] = useState<ChannelCandidate[] | null>(null);
+  const [ytActiveQuery, setYtActiveQuery] = useState("");
   const [ytNextPageToken, setYtNextPageToken] = useState<string | null>(null);
   const [ytCategoriesByChannel, setYtCategoriesByChannel] = useState<Record<string, Category[]>>({});
   const [registerErrors, setRegisterErrors] = useState<Record<string, string>>({});
@@ -202,13 +203,28 @@ export function Dashboard({
     }
   }
 
+  // 카테고리 탭이 선택돼 있으면 검색어 없이 "검색"만 눌러도 그 카테고리로 검색되게 한다.
+  // 검색어도 같이 입력했다면 "카테고리 검색어" 형태로 합쳐서 더 좁혀서 찾는다.
+  function buildSearchQuery(): string {
+    const parts: string[] = [];
+    if (activeCategory !== "전체") parts.push(activeCategory);
+    if (ytQuery.trim()) parts.push(ytQuery.trim());
+    return parts.join(" ").trim();
+  }
+
   function handleYoutubeSearch(e: React.FormEvent) {
     e.preventDefault();
-    runYoutubeSearch(ytQuery);
+    const query = buildSearchQuery();
+    if (!query) {
+      setYtError("카테고리를 선택하거나 검색어를 입력해주세요.");
+      return;
+    }
+    setYtActiveQuery(query);
+    runYoutubeSearch(query);
   }
 
   function handleLoadMore() {
-    if (ytNextPageToken) runYoutubeSearch(ytQuery, ytNextPageToken);
+    if (ytNextPageToken) runYoutubeSearch(ytActiveQuery, ytNextPageToken);
   }
 
   function toggleYtCategory(id: string, category: Category) {
@@ -398,7 +414,7 @@ export function Dashboard({
           type="text"
           value={ytQuery}
           onChange={(e) => setYtQuery(e.target.value)}
-          placeholder="키워드 / 채널명 / 주제로 유튜브에서 활동 중인 계정 검색 (예: 육아 브이로그)"
+          placeholder="키워드 / 채널명 / 주제로 유튜브에서 활동 중인 계정 검색 (아래 카테고리만 고르고 검색해도 됩니다)"
           className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
         />
         <button
@@ -414,6 +430,7 @@ export function Dashboard({
             onClick={() => {
               setYtResults(null);
               setYtQuery("");
+              setYtActiveQuery("");
               resetYtFilters();
             }}
             className="rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
@@ -453,7 +470,7 @@ export function Dashboard({
           />
 
           <p className="text-sm text-neutral-500">
-            &quot;{ytQuery}&quot; 검색 결과 {filteredYtResults?.length ?? 0}개 계정
+            &quot;{ytActiveQuery}&quot; 검색 결과 {filteredYtResults?.length ?? 0}개 계정
             {hasYtFilters && ` (전체 ${ytResults.length}개 중 필터링됨)`}
           </p>
           {filteredYtResults?.length === 0 ? (
