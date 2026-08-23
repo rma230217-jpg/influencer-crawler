@@ -45,6 +45,30 @@ export function extractEmail(description: string | null | undefined): string | n
   return match ? match[0] : null;
 }
 
+// 한국 전화번호(휴대폰/지역번호) 형태를 소개란에서 찾는다. 공개적으로 적혀있는 경우만 수집.
+const PHONE_REGEX = /0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}/;
+
+export function extractPhone(description: string | null | undefined): string | null {
+  if (!description) return null;
+  const match = PHONE_REGEX.exec(description);
+  return match ? match[0] : null;
+}
+
+const INSTAGRAM_URL_REGEX = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)/i;
+const INSTAGRAM_HANDLE_LINE_REGEX = /(?:instagram|insta|인스타)[^\n]*?@([a-zA-Z0-9_.]+)/i;
+
+export function extractInstagram(description: string | null | undefined): string | null {
+  if (!description) return null;
+
+  const urlMatch = INSTAGRAM_URL_REGEX.exec(description);
+  if (urlMatch) return `https://www.instagram.com/${urlMatch[1]}`;
+
+  const handleMatch = INSTAGRAM_HANDLE_LINE_REGEX.exec(description);
+  if (handleMatch) return `https://www.instagram.com/${handleMatch[1]}`;
+
+  return null;
+}
+
 export function channelUrlFromHandleOrId(customUrl: string | undefined, channelId: string): string {
   if (customUrl) {
     return `https://www.youtube.com/${customUrl.startsWith("@") ? customUrl : `@${customUrl}`}`;
@@ -84,6 +108,8 @@ export type ChannelDetails = {
   description: string;
   subscriberCount: number;
   contactEmail: string | null;
+  contactPhone: string | null;
+  contactInstagram: string | null;
   uploadsPlaylistId: string;
 };
 
@@ -110,6 +136,8 @@ export async function fetchChannelDetails(channelIds: string[]): Promise<Channel
           ? 0
           : Number(item.statistics.subscriberCount ?? 0),
         contactEmail: extractEmail(item.snippet.description),
+        contactPhone: extractPhone(item.snippet.description),
+        contactInstagram: extractInstagram(item.snippet.description),
         uploadsPlaylistId: item.contentDetails.relatedPlaylists.uploads,
       });
     }

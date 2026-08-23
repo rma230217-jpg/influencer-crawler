@@ -2,23 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { computeAvgViewsOfRecentShorts, fetchChannelDetails } from "@/lib/youtube";
 import { classifyCategories } from "@/lib/categorize";
-import { CATEGORIES, type Category, type Channel } from "@/lib/types";
+import { CHANNEL_SELECT, mapChannelRow, type ChannelRow } from "@/lib/channelRow";
+import { CATEGORIES, type Category } from "@/lib/types";
 
-type ChannelRow = {
-  id: string;
-  platform: string;
-  youtube_channel_id: string | null;
-  channel_name: string;
-  channel_url: string;
-  subscriber_count: number;
-  avg_views_last_6_shorts: number | null;
-  contact_email: string | null;
-  last_updated_at: string;
-  created_at: string;
-  channel_categories: { category: Category }[];
-};
-
-// 대시보드용 채널 목록 조회 (카테고리 포함)
+// 대시보드용 채널 목록 조회 (카테고리 + 저장 여부 포함)
 export async function GET() {
   const supabase = await createClient();
   const {
@@ -30,28 +17,14 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("channels")
-    .select(
-      "id, platform, youtube_channel_id, channel_name, channel_url, subscriber_count, avg_views_last_6_shorts, contact_email, last_updated_at, created_at, channel_categories(category)",
-    )
+    .select(CHANNEL_SELECT)
     .order("subscriber_count", { ascending: false });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const channels: Channel[] = (data as ChannelRow[]).map((row) => ({
-    id: row.id,
-    platform: row.platform,
-    youtube_channel_id: row.youtube_channel_id,
-    channel_name: row.channel_name,
-    channel_url: row.channel_url,
-    subscriber_count: row.subscriber_count,
-    avg_views_last_6_shorts: row.avg_views_last_6_shorts,
-    contact_email: row.contact_email,
-    last_updated_at: row.last_updated_at,
-    created_at: row.created_at,
-    categories: row.channel_categories.map((c) => c.category),
-  }));
+  const channels = (data as ChannelRow[]).map(mapChannelRow);
 
   return NextResponse.json({ channels });
 }
@@ -113,9 +86,12 @@ export async function POST(request: NextRequest) {
             youtube_channel_id: detail.youtubeChannelId,
             channel_name: detail.channelName,
             channel_url: detail.channelUrl,
+            description: detail.description,
             subscriber_count: detail.subscriberCount,
             avg_views_last_6_shorts: avgViews,
             contact_email: detail.contactEmail,
+            contact_phone: detail.contactPhone,
+            contact_instagram: detail.contactInstagram,
             last_updated_at: new Date().toISOString(),
             created_by: user.id,
           },

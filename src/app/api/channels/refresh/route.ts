@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
   const { data: channels, error } = await supabase
     .from("channels")
-    .select("id, youtube_channel_id")
+    .select("id, youtube_channel_id, contact_email, contact_phone, contact_instagram")
     .not("youtube_channel_id", "is", null);
 
   if (error) {
@@ -45,14 +45,18 @@ export async function GET(request: NextRequest) {
         }
 
         const { avgViews } = await computeAvgViewsOfRecentShorts(detail.uploadsPlaylistId);
+        // 연락처는 팀원이 수동으로 채워뒀을 수 있으므로, 기존 값이 없을 때만 자동 추출 값으로 채운다.
         const { error: updateError } = await supabase
           .from("channels")
           .update({
             channel_name: detail.channelName,
             channel_url: detail.channelUrl,
+            description: detail.description,
             subscriber_count: detail.subscriberCount,
             avg_views_last_6_shorts: avgViews,
-            contact_email: detail.contactEmail,
+            contact_email: row.contact_email ?? detail.contactEmail,
+            contact_phone: row.contact_phone ?? detail.contactPhone,
+            contact_instagram: row.contact_instagram ?? detail.contactInstagram,
             last_updated_at: new Date().toISOString(),
           })
           .eq("id", row.id);

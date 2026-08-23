@@ -44,6 +44,8 @@ export async function GET(request: NextRequest) {
           subscriberCount: d.subscriberCount,
           avgViewsLast6Shorts: avgViews,
           contactEmail: d.contactEmail,
+          contactPhone: d.contactPhone,
+          contactInstagram: d.contactInstagram,
           alreadyRegistered: existingIds.has(d.youtubeChannelId),
           suggestedCategories,
         };
