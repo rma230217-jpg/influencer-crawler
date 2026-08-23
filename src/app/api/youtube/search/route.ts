@@ -32,7 +32,9 @@ export async function GET(request: NextRequest) {
 
     const candidates: ChannelCandidate[] = await Promise.all(
       details.map(async (d) => {
-        const { avgViews, recentTitles } = await computeAvgViewsOfRecentShorts(d.uploadsPlaylistId);
+        const { avgViews, recentTitles, latestUploadDate } = await computeAvgViewsOfRecentShorts(
+          d.uploadsPlaylistId,
+        );
         const suggestedCategories = classifyCategories(
           [d.channelName, d.description, ...recentTitles].join(" "),
         );
@@ -47,6 +49,7 @@ export async function GET(request: NextRequest) {
           contactEmail: d.contactEmail,
           contactPhone: d.contactPhone,
           contactInstagram: d.contactInstagram,
+          latestUploadDate,
           alreadyRegistered: existingIds.has(d.youtubeChannelId),
           suggestedCategories,
         };

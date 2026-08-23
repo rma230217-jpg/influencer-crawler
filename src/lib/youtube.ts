@@ -172,7 +172,7 @@ async function fetchRecentVideoIds(uploadsPlaylistId: string): Promise<string[]>
 type YoutubeVideosResponse = {
   items: {
     id: string;
-    snippet: { title: string };
+    snippet: { title: string; publishedAt: string };
     statistics: { viewCount?: string };
     contentDetails: { duration: string };
   }[];
@@ -180,7 +180,9 @@ type YoutubeVideosResponse = {
 
 async function fetchVideoStats(
   videoIds: string[],
-): Promise<{ id: string; title: string; viewCount: number; durationSeconds: number }[]> {
+): Promise<
+  { id: string; title: string; publishedAt: string; viewCount: number; durationSeconds: number }[]
+> {
   if (videoIds.length === 0) return [];
   const data = await youtubeFetch<YoutubeVideosResponse>("videos", {
     part: "snippet,statistics,contentDetails",
@@ -189,6 +191,7 @@ async function fetchVideoStats(
   return data.items.map((item) => ({
     id: item.id,
     title: item.snippet.title,
+    publishedAt: item.snippet.publishedAt,
     viewCount: Number(item.statistics.viewCount ?? 0),
     durationSeconds: parseIsoDurationToSeconds(item.contentDetails.duration),
   }));
@@ -196,21 +199,30 @@ async function fetchVideoStats(
 
 // 최근 업로드 영상 중 60초 이하(숏폼)만 필터링해 가장 최근 6개의 평균 조회수를 계산한다.
 // (3.2 "최근 업로드 6개 영상 평균 조회수(숏폼 기준)")
-// 카테고리 자동분류에 쓸 수 있도록 최근 업로드 제목 목록도 함께 반환한다.
-export async function computeAvgViewsOfRecentShorts(
-  uploadsPlaylistId: string,
-): Promise<{ avgViews: number | null; sampleSize: number; recentTitles: string[] }> {
+// 카테고리 자동분류(제목)와 업로드 날짜 필터(최근 업로드일)에 쓸 수 있도록 함께 반환한다.
+export async function computeAvgViewsOfRecentShorts(uploadsPlaylistId: string): Promise<{
+  avgViews: number | null;
+  sampleSize: number;
+  recentTitles: string[];
+  latestUploadDate: string | null;
+}> {
   const recentVideoIds = await fetchRecentVideoIds(uploadsPlaylistId);
   const stats = await fetchVideoStats(recentVideoIds);
   const recentTitles = stats.map((v) => v.title);
+  // playlistItems는 업로드 최신순으로 반환되므로 맨 앞이 가장 최근 업로드다.
+  const latestUploadDate = stats[0]?.publishedAt ?? null;
 
-  // playlistItems는 업로드 최신순으로 반환되므로 순서를 유지한 채 필터링한다.
   const shorts = stats
     .filter((v) => v.durationSeconds > 0 && v.durationSeconds <= SHORTS_MAX_DURATION_SECONDS)
     .slice(0, SHORTS_SAMPLE_SIZE);
 
-  if (shorts.length === 0) return { avgViews: null, sampleSize: 0, recentTitles };
+  if (shorts.length === 0) return { avgViews: null, sampleSize: 0, recentTitles, latestUploadDate };
 
   const total = shorts.reduce((sum, v) => sum + v.viewCount, 0);
-  return { avgViews: Math.round(total / shorts.length), sampleSize: shorts.length, recentTitles };
+  return {
+    avgViews: Math.round(total / shorts.length),
+    sampleSize: shorts.length,
+    recentTitles,
+    latestUploadDate,
+  };
 }

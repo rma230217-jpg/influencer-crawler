@@ -90,6 +90,14 @@ export function Dashboard({
   const [ytCategoriesByChannel, setYtCategoriesByChannel] = useState<Record<string, Category[]>>({});
   const [registerErrors, setRegisterErrors] = useState<Record<string, string>>({});
 
+  // 검색 결과 필터: 조회수 범위 / 구독자 범위 / 최근 업로드 날짜 범위
+  const [minViews, setMinViews] = useState("");
+  const [maxViews, setMaxViews] = useState("");
+  const [minSubs, setMinSubs] = useState("");
+  const [maxSubs, setMaxSubs] = useState("");
+  const [uploadFrom, setUploadFrom] = useState("");
+  const [uploadTo, setUploadTo] = useState("");
+
   // 채널 등록 시 목록(리스트) 선택 팝업
   const [pickingCandidate, setPickingCandidate] = useState<ChannelCandidate | null>(null);
   const [availableLists, setAvailableLists] = useState<ChannelList[] | null>(null);
@@ -108,6 +116,48 @@ export function Dashboard({
       return sortDirection === "desc" ? bv - av : av - bv;
     });
   }, [channels, activeCategory, sortKey, sortDirection]);
+
+  const hasYtFilters = Boolean(minViews || maxViews || minSubs || maxSubs || uploadFrom || uploadTo);
+
+  const filteredYtResults = useMemo(() => {
+    if (!ytResults) return null;
+    if (!hasYtFilters) return ytResults;
+
+    const minV = minViews ? Number(minViews) : null;
+    const maxV = maxViews ? Number(maxViews) : null;
+    const minS = minSubs ? Number(minSubs) : null;
+    const maxS = maxSubs ? Number(maxSubs) : null;
+    const fromDate = uploadFrom ? new Date(uploadFrom) : null;
+    // "까지" 날짜는 그날 끝까지 포함되도록 다음날 자정 직전으로 계산한다.
+    const toDate = uploadTo ? new Date(new Date(uploadTo).getTime() + 24 * 60 * 60 * 1000) : null;
+
+    return ytResults.filter((c) => {
+      if ((minV !== null || maxV !== null) && c.avgViewsLast6Shorts === null) return false;
+      if (minV !== null && (c.avgViewsLast6Shorts ?? 0) < minV) return false;
+      if (maxV !== null && (c.avgViewsLast6Shorts ?? 0) > maxV) return false;
+
+      if (minS !== null && c.subscriberCount < minS) return false;
+      if (maxS !== null && c.subscriberCount > maxS) return false;
+
+      if ((fromDate || toDate) && !c.latestUploadDate) return false;
+      if (c.latestUploadDate) {
+        const uploaded = new Date(c.latestUploadDate);
+        if (fromDate && uploaded < fromDate) return false;
+        if (toDate && uploaded >= toDate) return false;
+      }
+
+      return true;
+    });
+  }, [ytResults, hasYtFilters, minViews, maxViews, minSubs, maxSubs, uploadFrom, uploadTo]);
+
+  function resetYtFilters() {
+    setMinViews("");
+    setMaxViews("");
+    setMinSubs("");
+    setMaxSubs("");
+    setUploadFrom("");
+    setUploadTo("");
+  }
 
   const contactChannel = channels.find((c) => c.id === contactChannelId) ?? null;
 
@@ -364,6 +414,7 @@ export function Dashboard({
             onClick={() => {
               setYtResults(null);
               setYtQuery("");
+              resetYtFilters();
             }}
             className="rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
           >
@@ -382,16 +433,36 @@ export function Dashboard({
       )}
       {ytResults && !ytLoading && (
         <div className="mb-6 space-y-3">
+          <YtResultFilters
+            minViews={minViews}
+            maxViews={maxViews}
+            minSubs={minSubs}
+            maxSubs={maxSubs}
+            uploadFrom={uploadFrom}
+            uploadTo={uploadTo}
+            onChange={{
+              setMinViews,
+              setMaxViews,
+              setMinSubs,
+              setMaxSubs,
+              setUploadFrom,
+              setUploadTo,
+            }}
+            onReset={resetYtFilters}
+            hasFilters={hasYtFilters}
+          />
+
           <p className="text-sm text-neutral-500">
-            &quot;{ytQuery}&quot; 검색 결과 {ytResults.length}개 계정
+            &quot;{ytQuery}&quot; 검색 결과 {filteredYtResults?.length ?? 0}개 계정
+            {hasYtFilters && ` (전체 ${ytResults.length}개 중 필터링됨)`}
           </p>
-          {ytResults.length === 0 ? (
+          {filteredYtResults?.length === 0 ? (
             <div className="rounded-lg border border-dashed border-neutral-300 bg-white py-10 text-center text-sm text-neutral-500">
-              활동 중인 계정을 찾지 못했습니다.
+              {hasYtFilters ? "필터 조건에 맞는 계정이 없습니다." : "활동 중인 계정을 찾지 못했습니다."}
             </div>
           ) : (
             <>
-              {ytResults.map((c) => (
+              {filteredYtResults?.map((c) => (
                 <YoutubeCandidateRow
                   key={c.youtubeChannelId}
                   candidate={c}
@@ -832,6 +903,116 @@ function ContactModal({
 
 // 9.1 메인 검색 결과 한 줄: 유튜브에서 실시간으로 찾은 계정 + 바로 등록 가능한 버튼.
 // 9.2 연락처(이메일/전화번호/인스타그램)를 바로 확인할 수 있도록 각각 따로 보여준다.
+// 검색 결과 필터: 조회수 범위 / 구독자 범위 / 최근 업로드 날짜 범위
+function YtResultFilters({
+  minViews,
+  maxViews,
+  minSubs,
+  maxSubs,
+  uploadFrom,
+  uploadTo,
+  onChange,
+  onReset,
+  hasFilters,
+}: {
+  minViews: string;
+  maxViews: string;
+  minSubs: string;
+  maxSubs: string;
+  uploadFrom: string;
+  uploadTo: string;
+  onChange: {
+    setMinViews: (v: string) => void;
+    setMaxViews: (v: string) => void;
+    setMinSubs: (v: string) => void;
+    setMaxSubs: (v: string) => void;
+    setUploadFrom: (v: string) => void;
+    setUploadTo: (v: string) => void;
+  };
+  onReset: () => void;
+  hasFilters: boolean;
+}) {
+  const numberInputClass =
+    "w-24 rounded-md border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:border-neutral-500";
+  const dateInputClass =
+    "rounded-md border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:border-neutral-500";
+
+  return (
+    <div className="flex flex-wrap items-end gap-4 rounded-lg border border-neutral-200 bg-white p-3">
+      <div>
+        <label className="mb-1 block text-xs text-neutral-500">조회수 범위</label>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            min={0}
+            placeholder="최소"
+            value={minViews}
+            onChange={(e) => onChange.setMinViews(e.target.value)}
+            className={numberInputClass}
+          />
+          <span className="text-neutral-400">~</span>
+          <input
+            type="number"
+            min={0}
+            placeholder="최대"
+            value={maxViews}
+            onChange={(e) => onChange.setMaxViews(e.target.value)}
+            className={numberInputClass}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs text-neutral-500">구독자 범위</label>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            min={0}
+            placeholder="최소"
+            value={minSubs}
+            onChange={(e) => onChange.setMinSubs(e.target.value)}
+            className={numberInputClass}
+          />
+          <span className="text-neutral-400">~</span>
+          <input
+            type="number"
+            min={0}
+            placeholder="최대"
+            value={maxSubs}
+            onChange={(e) => onChange.setMaxSubs(e.target.value)}
+            className={numberInputClass}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs text-neutral-500">영상 업로드 날짜 범위</label>
+        <div className="flex items-center gap-1">
+          <input
+            type="date"
+            value={uploadFrom}
+            onChange={(e) => onChange.setUploadFrom(e.target.value)}
+            className={dateInputClass}
+          />
+          <span className="text-neutral-400">~</span>
+          <input
+            type="date"
+            value={uploadTo}
+            onChange={(e) => onChange.setUploadTo(e.target.value)}
+            className={dateInputClass}
+          />
+        </div>
+      </div>
+
+      {hasFilters && (
+        <button onClick={onReset} className="text-xs text-neutral-500 hover:text-neutral-900">
+          필터 초기화
+        </button>
+      )}
+    </div>
+  );
+}
+
 function YoutubeCandidateRow({
   candidate,
   selectedCategories,
@@ -870,7 +1051,8 @@ function YoutubeCandidateRow({
           </div>
           <p className="mt-0.5 text-xs text-neutral-500">
             구독자 {candidate.subscriberCount.toLocaleString("ko-KR")}명 · 최근 숏폼 평균 조회수{" "}
-            {candidate.avgViewsLast6Shorts?.toLocaleString("ko-KR") ?? "숏폼 없음"}
+            {candidate.avgViewsLast6Shorts?.toLocaleString("ko-KR") ?? "숏폼 없음"} · 최근 업로드{" "}
+            {candidate.latestUploadDate ? candidate.latestUploadDate.slice(0, 10) : "정보 없음"}
           </p>
           <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-neutral-500">
             <div className="flex gap-1">
