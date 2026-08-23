@@ -78,17 +78,27 @@ export function channelUrlFromHandleOrId(customUrl: string | undefined, channelI
 
 type YoutubeSearchResponse = {
   items: { id: { channelId: string } }[];
+  nextPageToken?: string;
 };
 
 // 키워드로 채널 후보를 검색해 channelId 목록을 반환한다.
-export async function searchChannelIds(query: string, maxResults = 15): Promise<string[]> {
+// YouTube search.list는 한 번에 최대 50개까지만 반환하므로(더 큰 값은 API가 자동으로 50으로 잘라냄),
+// "제한 없이 전부"에 가장 가깝게 하려면 nextPageToken으로 계속 다음 페이지를 이어서 가져와야 한다.
+export async function searchChannelIds(
+  query: string,
+  pageToken?: string,
+): Promise<{ channelIds: string[]; nextPageToken: string | null }> {
   const data = await youtubeFetch<YoutubeSearchResponse>("search", {
     part: "snippet",
     type: "channel",
     q: query,
-    maxResults: String(maxResults),
+    maxResults: "50",
+    ...(pageToken ? { pageToken } : {}),
   });
-  return data.items.map((item) => item.id.channelId);
+  return {
+    channelIds: data.items.map((item) => item.id.channelId),
+    nextPageToken: data.nextPageToken ?? null,
+  };
 }
 
 type YoutubeChannelsResponse = {

@@ -45,3 +45,10 @@ export type ChannelCandidate = {
 
 export type SortKey = "subscriber_count" | "avg_views_last_6_shorts";
 export type SortDirection = "asc" | "desc";
+
+export type ChannelList = {
+  id: string;
+  name: string;
+  channel_count: number;
+  created_at: string;
+};

@@ -16,6 +16,9 @@ export function Navbar({ userEmail }: { userEmail: string | null }) {
             <Link href="/saved" className="hover:text-neutral-900">
               저장 목록
             </Link>
+            <Link href="/lists" className="hover:text-neutral-900">
+              목록
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-4">

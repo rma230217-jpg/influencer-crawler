@@ -18,9 +18,10 @@ export async function GET(request: NextRequest) {
   if (!query) {
     return NextResponse.json({ error: "검색어(q)가 필요합니다." }, { status: 400 });
   }
+  const pageToken = request.nextUrl.searchParams.get("pageToken") ?? undefined;
 
   try {
-    const channelIds = await searchChannelIds(query);
+    const { channelIds, nextPageToken } = await searchChannelIds(query, pageToken);
     const details = await fetchChannelDetails(channelIds);
 
     const { data: existing } = await supabase
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest) {
       }),
     );
 
-    return NextResponse.json({ candidates });
+    return NextResponse.json({ candidates, nextPageToken });
   } catch (error) {
     console.error(error);
     const message = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";

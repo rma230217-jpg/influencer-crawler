@@ -6,6 +6,7 @@ import {
   type Category,
   type Channel,
   type ChannelCandidate,
+  type ChannelList,
   type SortDirection,
   type SortKey,
 } from "@/lib/types";
@@ -60,11 +61,14 @@ function downloadChannelsCsv(channels: Channel[]) {
 export function Dashboard({
   initialChannels,
   variant = "all",
+  listId,
 }: {
   initialChannels: Channel[];
-  variant?: "all" | "saved";
+  variant?: "all" | "saved" | "list";
+  listId?: string;
 }) {
   const [channels, setChannels] = useState(initialChannels);
+  const [removingFromListId, setRemovingFromListId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<Category | "전체">("전체");
   const [sortKey, setSortKey] = useState<SortKey>("avg_views_last_6_shorts");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -79,10 +83,17 @@ export function Dashboard({
   // 9.1 메인 검색: 키워드/채널/주제로 유튜브에서 실시간으로 활동 중인 계정을 찾는다.
   const [ytQuery, setYtQuery] = useState("");
   const [ytLoading, setYtLoading] = useState(false);
+  const [ytLoadingMore, setYtLoadingMore] = useState(false);
   const [ytError, setYtError] = useState<string | null>(null);
   const [ytResults, setYtResults] = useState<ChannelCandidate[] | null>(null);
+  const [ytNextPageToken, setYtNextPageToken] = useState<string | null>(null);
   const [ytCategoriesByChannel, setYtCategoriesByChannel] = useState<Record<string, Category[]>>({});
-  const [registeringId, setRegisteringId] = useState<string | null>(null);
+  const [registerErrors, setRegisterErrors] = useState<Record<string, string>>({});
+
+  // 채널 등록 시 목록(리스트) 선택 팝업
+  const [pickingCandidate, setPickingCandidate] = useState<ChannelCandidate | null>(null);
+  const [availableLists, setAvailableLists] = useState<ChannelList[] | null>(null);
+  const [registering, setRegistering] = useState(false);
 
   const filtered = useMemo(() => {
     let list = channels;
@@ -108,28 +119,46 @@ export function Dashboard({
     }
   }
 
-  async function handleYoutubeSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!ytQuery.trim()) return;
+  // 9.1: pageToken이 있으면 다음 페이지를 이어붙이고("더 보기"), 없으면 새 검색으로 초기화한다.
+  async function runYoutubeSearch(query: string, pageToken?: string) {
+    if (!query.trim()) return;
 
-    setYtLoading(true);
+    if (pageToken) setYtLoadingMore(true);
+    else {
+      setYtLoading(true);
+      setYtResults(null);
+    }
     setYtError(null);
-    setYtResults(null);
 
     try {
-      const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(ytQuery.trim())}`);
+      const url = `/api/youtube/search?q=${encodeURIComponent(query.trim())}${
+        pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""
+      }`;
+      const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "검색에 실패했습니다.");
       const results: ChannelCandidate[] = data.candidates;
-      setYtResults(results);
-      setYtCategoriesByChannel(
-        Object.fromEntries(results.map((c) => [c.youtubeChannelId, c.suggestedCategories])),
-      );
+      setYtResults((prev) => (pageToken && prev ? [...prev, ...results] : results));
+      setYtCategoriesByChannel((prev) => ({
+        ...(pageToken ? prev : {}),
+        ...Object.fromEntries(results.map((c) => [c.youtubeChannelId, c.suggestedCategories])),
+      }));
+      setYtNextPageToken(data.nextPageToken ?? null);
     } catch (err) {
       setYtError(err instanceof Error ? err.message : "검색에 실패했습니다.");
     } finally {
       setYtLoading(false);
+      setYtLoadingMore(false);
     }
+  }
+
+  function handleYoutubeSearch(e: React.FormEvent) {
+    e.preventDefault();
+    runYoutubeSearch(ytQuery);
+  }
+
+  function handleLoadMore() {
+    if (ytNextPageToken) runYoutubeSearch(ytQuery, ytNextPageToken);
   }
 
   function toggleYtCategory(id: string, category: Category) {
@@ -142,23 +171,74 @@ export function Dashboard({
     });
   }
 
-  async function registerCandidate(candidate: ChannelCandidate) {
-    setRegisteringId(candidate.youtubeChannelId);
-    const res = await fetch("/api/channels", {
+  // 4. 채널 등록 버튼 -> 어느 목록에 넣을지 고르는 팝업을 띄운다.
+  async function openListPicker(candidate: ChannelCandidate) {
+    setPickingCandidate(candidate);
+    setRegisterErrors((prev) => ({ ...prev, [candidate.youtubeChannelId]: "" }));
+    if (availableLists === null) {
+      const res = await fetch("/api/lists");
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableLists(data.lists ?? []);
+      } else {
+        setAvailableLists([]);
+      }
+    }
+  }
+
+  async function createList(name: string): Promise<ChannelList | null> {
+    const res = await fetch("/api/lists", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        candidates: [
-          {
-            youtubeChannelId: candidate.youtubeChannelId,
-            categories: ytCategoriesByChannel[candidate.youtubeChannelId] ?? [],
-          },
-        ],
-      }),
+      body: JSON.stringify({ name }),
     });
-    setRegisteringId(null);
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error ?? "목록 생성에 실패했습니다.");
+      return null;
+    }
+    setAvailableLists((prev) => [data.list, ...(prev ?? [])]);
+    return data.list;
+  }
 
-    if (res.ok) {
+  // 채널 등록(+ 선택한 목록에 추가). listId가 없으면 목록 없이 등록만 한다.
+  async function finalizeRegistration(candidate: ChannelCandidate, listId: string | null) {
+    setRegistering(true);
+    setRegisterErrors((prev) => ({ ...prev, [candidate.youtubeChannelId]: "" }));
+
+    try {
+      const res = await fetch("/api/channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidates: [
+            {
+              youtubeChannelId: candidate.youtubeChannelId,
+              categories: ytCategoriesByChannel[candidate.youtubeChannelId] ?? [],
+            },
+          ],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "등록에 실패했습니다.");
+
+      const insertedId: string | undefined = data.inserted?.[0]?.id;
+      if (listId && insertedId) {
+        const listRes = await fetch(`/api/lists/${listId}/channels`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channelId: insertedId }),
+        });
+        if (!listRes.ok) {
+          const listData = await listRes.json().catch(() => ({}));
+          throw new Error(listData.error ?? "목록에 추가하는 데 실패했습니다 (채널 등록은 완료됐어요).");
+        }
+        setAvailableLists(
+          (prev) =>
+            prev?.map((l) => (l.id === listId ? { ...l, channel_count: l.channel_count + 1 } : l)) ?? prev,
+        );
+      }
+
       setYtResults(
         (prev) =>
           prev?.map((c) =>
@@ -166,8 +246,12 @@ export function Dashboard({
           ) ?? null,
       );
       await refreshChannels();
-    } else {
-      alert("등록에 실패했습니다.");
+      setPickingCandidate(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "등록에 실패했습니다.";
+      setRegisterErrors((prev) => ({ ...prev, [candidate.youtubeChannelId]: message }));
+    } finally {
+      setRegistering(false);
     }
   }
 
@@ -207,6 +291,19 @@ export function Dashboard({
       setChannels((prev) => prev.filter((c) => c.id !== id));
     } else {
       alert("삭제에 실패했습니다.");
+    }
+  }
+
+  // 4. 목록(리스트) 상세 화면에서 채널을 그 목록에서만 빼기
+  async function removeFromList(channelId: string) {
+    if (!listId) return;
+    setRemovingFromListId(channelId);
+    const res = await fetch(`/api/lists/${listId}/channels/${channelId}`, { method: "DELETE" });
+    setRemovingFromListId(null);
+    if (res.ok) {
+      setChannels((prev) => prev.filter((c) => c.id !== channelId));
+    } else {
+      alert("목록에서 제거하는 데 실패했습니다.");
     }
   }
 
@@ -293,18 +390,41 @@ export function Dashboard({
               활동 중인 계정을 찾지 못했습니다.
             </div>
           ) : (
-            ytResults.map((c) => (
-              <YoutubeCandidateRow
-                key={c.youtubeChannelId}
-                candidate={c}
-                selectedCategories={ytCategoriesByChannel[c.youtubeChannelId] ?? []}
-                onToggleCategory={(cat) => toggleYtCategory(c.youtubeChannelId, cat)}
-                onRegister={() => registerCandidate(c)}
-                registering={registeringId === c.youtubeChannelId}
-              />
-            ))
+            <>
+              {ytResults.map((c) => (
+                <YoutubeCandidateRow
+                  key={c.youtubeChannelId}
+                  candidate={c}
+                  selectedCategories={ytCategoriesByChannel[c.youtubeChannelId] ?? []}
+                  onToggleCategory={(cat) => toggleYtCategory(c.youtubeChannelId, cat)}
+                  onRegister={() => openListPicker(c)}
+                  error={registerErrors[c.youtubeChannelId]}
+                />
+              ))}
+              {ytNextPageToken && (
+                <button
+                  onClick={handleLoadMore}
+                  disabled={ytLoadingMore}
+                  className="w-full rounded-md border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+                >
+                  {ytLoadingMore ? "불러오는 중..." : "더 보기"}
+                </button>
+              )}
+            </>
           )}
         </div>
+      )}
+
+      {pickingCandidate && (
+        <ListPickerModal
+          candidateName={pickingCandidate.channelName}
+          lists={availableLists}
+          registering={registering}
+          onPickList={(listId) => finalizeRegistration(pickingCandidate, listId)}
+          onSkip={() => finalizeRegistration(pickingCandidate, null)}
+          onCreateList={createList}
+          onClose={() => setPickingCandidate(null)}
+        />
       )}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -372,7 +492,11 @@ export function Dashboard({
 
       {filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed border-neutral-300 bg-white py-16 text-center text-sm text-neutral-500">
-          {variant === "saved" ? "저장된 채널이 없습니다." : "조건에 맞는 채널이 없습니다."}
+          {variant === "saved"
+            ? "저장된 채널이 없습니다."
+            : variant === "list"
+              ? "이 목록에 채널이 없습니다."
+              : "조건에 맞는 채널이 없습니다."}
         </div>
       ) : view === "table" ? (
         <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
@@ -448,6 +572,15 @@ export function Dashboard({
                       >
                         컨택하기
                       </button>
+                      {variant === "list" && (
+                        <button
+                          onClick={() => removeFromList(c.id)}
+                          disabled={removingFromListId === c.id}
+                          className="text-xs text-neutral-500 hover:text-neutral-700 disabled:opacity-50"
+                        >
+                          목록에서 제거
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDelete(c.id)}
                         disabled={deletingId === c.id}
@@ -529,12 +662,23 @@ export function Dashboard({
               </dl>
               <div className="mt-2 flex items-center justify-between">
                 <p className="text-xs text-neutral-400">최종 업데이트 {formatDate(c.last_updated_at)}</p>
-                <button
-                  onClick={() => setContactChannelId(c.id)}
-                  className="text-xs font-medium text-neutral-700 hover:underline"
-                >
-                  컨택하기
-                </button>
+                <div className="flex items-center gap-3">
+                  {variant === "list" && (
+                    <button
+                      onClick={() => removeFromList(c.id)}
+                      disabled={removingFromListId === c.id}
+                      className="text-xs text-neutral-500 hover:text-neutral-700 disabled:opacity-50"
+                    >
+                      목록에서 제거
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setContactChannelId(c.id)}
+                    className="text-xs font-medium text-neutral-700 hover:underline"
+                  >
+                    컨택하기
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -687,18 +831,19 @@ function ContactModal({
 }
 
 // 9.1 메인 검색 결과 한 줄: 유튜브에서 실시간으로 찾은 계정 + 바로 등록 가능한 버튼.
+// 9.2 연락처(이메일/전화번호/인스타그램)를 바로 확인할 수 있도록 각각 따로 보여준다.
 function YoutubeCandidateRow({
   candidate,
   selectedCategories,
   onToggleCategory,
   onRegister,
-  registering,
+  error,
 }: {
   candidate: ChannelCandidate;
   selectedCategories: Category[];
   onToggleCategory: (category: Category) => void;
   onRegister: () => void;
-  registering: boolean;
+  error?: string;
 }) {
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-4">
@@ -726,10 +871,34 @@ function YoutubeCandidateRow({
           <p className="mt-0.5 text-xs text-neutral-500">
             구독자 {candidate.subscriberCount.toLocaleString("ko-KR")}명 · 최근 숏폼 평균 조회수{" "}
             {candidate.avgViewsLast6Shorts?.toLocaleString("ko-KR") ?? "숏폼 없음"}
-            {candidate.contactEmail ? ` · ${candidate.contactEmail}` : ""}
-            {candidate.contactPhone ? ` · ${candidate.contactPhone}` : ""}
-            {candidate.contactInstagram ? " · IG" : ""}
           </p>
+          <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-neutral-500">
+            <div className="flex gap-1">
+              <dt className="text-neutral-400">이메일</dt>
+              <dd>{candidate.contactEmail ?? "-"}</dd>
+            </div>
+            <div className="flex gap-1">
+              <dt className="text-neutral-400">전화번호</dt>
+              <dd>{candidate.contactPhone ?? "-"}</dd>
+            </div>
+            <div className="flex gap-1">
+              <dt className="text-neutral-400">인스타그램</dt>
+              <dd>
+                {candidate.contactInstagram ? (
+                  <a
+                    href={candidate.contactInstagram}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-neutral-700 hover:underline"
+                  >
+                    {candidate.contactInstagram.replace(/^https?:\/\/(www\.)?instagram\.com\//, "@")}
+                  </a>
+                ) : (
+                  "-"
+                )}
+              </dd>
+            </div>
+          </dl>
           <p className="mt-1 line-clamp-2 text-xs text-neutral-400">{candidate.description}</p>
 
           {!candidate.alreadyRegistered && (
@@ -753,16 +922,109 @@ function YoutubeCandidateRow({
                   );
                 })}
               </div>
+              {error && <p className="mt-1.5 text-xs text-red-600">{error}</p>}
               <button
                 onClick={onRegister}
-                disabled={registering}
-                className="mt-2 rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+                className="mt-2 rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800"
               >
-                {registering ? "등록 중..." : "채널 등록"}
+                채널 등록
               </button>
             </>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 4. 채널 등록 시 목록 선택: 기존 목록은 클릭만으로 추가, 새 목록도 그 자리에서 만들 수 있다.
+function ListPickerModal({
+  candidateName,
+  lists,
+  registering,
+  onPickList,
+  onSkip,
+  onCreateList,
+  onClose,
+}: {
+  candidateName: string;
+  lists: ChannelList[] | null;
+  registering: boolean;
+  onPickList: (listId: string) => void;
+  onSkip: () => void;
+  onCreateList: (name: string) => Promise<ChannelList | null>;
+  onClose: () => void;
+}) {
+  const [newListName, setNewListName] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  async function handleCreateAndPick(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newListName.trim()) return;
+    setCreating(true);
+    const list = await onCreateList(newListName.trim());
+    setCreating(false);
+    if (list) {
+      setNewListName("");
+      onPickList(list.id);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 flex items-start justify-between">
+          <h2 className="text-base font-semibold text-neutral-900">{candidateName} 등록</h2>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700" disabled={registering}>
+            ✕
+          </button>
+        </div>
+        <p className="mb-4 text-xs text-neutral-400">어느 목록에 추가할까요? 목록 없이 등록만 할 수도 있어요.</p>
+
+        <form onSubmit={handleCreateAndPick} className="mb-4 flex gap-2">
+          <input
+            type="text"
+            value={newListName}
+            onChange={(e) => setNewListName(e.target.value)}
+            placeholder="새 목록 이름"
+            disabled={registering}
+            className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
+          />
+          <button
+            type="submit"
+            disabled={creating || registering || !newListName.trim()}
+            className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {creating ? "생성 중..." : "만들고 등록"}
+          </button>
+        </form>
+
+        {lists === null ? (
+          <p className="text-sm text-neutral-400">목록을 불러오는 중...</p>
+        ) : lists.length > 0 ? (
+          <div className="mb-4 flex flex-wrap gap-2">
+            {lists.map((list) => (
+              <button
+                key={list.id}
+                onClick={() => onPickList(list.id)}
+                disabled={registering}
+                className="rounded-full border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+              >
+                {list.name} ({list.channel_count})
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="mb-4 text-sm text-neutral-400">아직 만든 목록이 없습니다.</p>
+        )}
+
+        <button
+          onClick={onSkip}
+          disabled={registering}
+          className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 disabled:opacity-50"
+        >
+          {registering ? "등록 중..." : "목록에 추가하지 않고 등록만"}
+        </button>
       </div>
     </div>
   );
