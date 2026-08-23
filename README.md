@@ -38,6 +38,7 @@ Next.js(App Router) + Supabase(Postgres/Auth) + YouTube Data API v3 로 구성�
 - **`0001_init.sql`**: `channel_category` enum (뷰티/패션/푸드/리빙-홈/육아/반려동물/살림), `channels` 테이블, `channel_categories` 다대다 테이블, RLS(Row Level Security) 정책 — **로그인한 팀원(authenticated)만** 읽기/쓰기 가능 (내부용 툴이므로 외부 비공개)
 - **`0002_v2_features.sql`**: 통합 검색용 `description` 컬럼, 컨택하기용 `contact_phone`/`contact_instagram` 컬럼, 저장 목록(즐겨찾기)용 `saved_channels` 테이블 + RLS
 - **`0003_lists.sql`**: 이름 붙여 채널을 분류하는 목록 기능용 `lists`/`list_channels` 테이블 + RLS
+- **`0004_add_categories.sql`**: 카테고리 3개 추가 (건강/헬스/사주)
 
 ### 1-3. 팀원 로그인 계정 만들기 (Supabase Auth)
 
