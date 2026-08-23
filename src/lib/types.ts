@@ -39,6 +39,7 @@ export type ChannelCandidate = {
   contactEmail: string | null;
   contactPhone: string | null;
   contactInstagram: string | null;
+  latestUploadDate: string | null;
   alreadyRegistered: boolean;
   suggestedCategories: Category[];
 };
