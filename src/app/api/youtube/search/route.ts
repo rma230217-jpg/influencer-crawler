@@ -4,6 +4,9 @@ import { computeAvgViewsOfRecentShorts, fetchChannelDetails, searchChannelIds } 
 import { classifyCategories } from "@/lib/categorize";
 import type { ChannelCandidate } from "@/lib/types";
 
+// 채널마다 YouTube API를 추가로 호출하다 보니 응답이 오래 걸릴 수 있어 실행시간 여유를 넉넉히 둔다.
+export const maxDuration = 30;
+
 // 키워드 검색 -> 채널 후보 목록 반환 (3.1 "키워드 검색 → 후보 등록 → 상세 정보 수집")
 export async function GET(request: NextRequest) {
   const supabase = await createClient();

@@ -6,13 +6,16 @@ export function Navbar({ userEmail }: { userEmail: string | null }) {
     <header className="border-b border-neutral-200 bg-white">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
         <div className="flex items-center gap-5">
-          <Link href="/" className="text-base font-semibold text-neutral-900">
+          {/* 검색창 등 대시보드 상태를 완전히 초기화하기 위해 일부러 일반 링크(전체 새로고침)를 사용한다. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/" className="text-base font-semibold text-neutral-900">
             인플루언서 발굴 대시보드
-          </Link>
+          </a>
           <nav className="flex items-center gap-4 text-sm text-neutral-500">
-            <Link href="/" className="hover:text-neutral-900">
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a href="/" className="hover:text-neutral-900">
               대시보드
-            </Link>
+            </a>
             <Link href="/saved" className="hover:text-neutral-900">
               저장 목록
             </Link>
