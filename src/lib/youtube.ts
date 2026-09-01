@@ -7,6 +7,10 @@ const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
 const SHORTS_MAX_DURATION_SECONDS = 60;
 const RECENT_UPLOADS_TO_SCAN = 20;
 const SHORTS_SAMPLE_SIZE = 6;
+// 검색 결과 한 페이지당 상세 조회(구독자/조회수/연락처)를 돌릴 채널 수.
+// 값이 클수록 한 번에 더 많이 보이지만, 채널마다 API 호출이 2번씩 추가로 붙어 응답이 느려진다.
+// "더 보기"로 계속 이어서 불러올 수 있으므로 작게 잡아 첫 응답 속도를 우선한다.
+const SEARCH_PAGE_SIZE = 15;
 
 function getApiKey(): string {
   const key = process.env.YOUTUBE_API_KEY;
@@ -82,8 +86,8 @@ type YoutubeSearchResponse = {
 };
 
 // 키워드로 채널 후보를 검색해 channelId 목록을 반환한다.
-// YouTube search.list는 한 번에 최대 50개까지만 반환하므로(더 큰 값은 API가 자동으로 50으로 잘라냄),
-// "제한 없이 전부"에 가장 가깝게 하려면 nextPageToken으로 계속 다음 페이지를 이어서 가져와야 한다.
+// 한 페이지 크기는 SEARCH_PAGE_SIZE로 제한해 응답 속도를 확보하고,
+// "더 보기"로 nextPageToken을 이어가며 사실상 개수 제한 없이 계속 불러올 수 있게 한다.
 export async function searchChannelIds(
   query: string,
   pageToken?: string,
@@ -92,7 +96,7 @@ export async function searchChannelIds(
     part: "snippet",
     type: "channel",
     q: query,
-    maxResults: "50",
+    maxResults: String(SEARCH_PAGE_SIZE),
     ...(pageToken ? { pageToken } : {}),
   });
   return {
